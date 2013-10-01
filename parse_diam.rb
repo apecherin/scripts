@@ -1,6 +1,7 @@
 require "net/http"
 require "uri"
 require 'nokogiri'
+require 'csv'
 class ParseDiam
   def initialize(id, carat = 0)
     @cert_number = id.to_s
@@ -87,7 +88,7 @@ class ParseDiam
           fluor_arr = fluor_int.split
           if  fluor_arr.size == 3
             fluor_color  = fluor_arr[2].downcase.capitalize
-            fluor_int  = fluor_arr[0].downcase.capitalize +' ' + fluor_arr[1].downcase.capitalize
+            fluor_int  = fluor_arr[0].downcase.capitalize + " " + fluor_arr[1].downcase.capitalize
           elsif fluor_arr.size == 2
             fluor_color  = fluor_arr[1].downcase.capitalize
             fluor_int  = fluor_arr[0].downcase.capitalize
@@ -102,7 +103,9 @@ class ParseDiam
         if  comments.css("tr").length > 0
           i=0
           loop do
-            comment << comments.css("tr")[i].css("td")[0].css("span").text + '|'
+            comm = comments.css("tr")[i].css("td")[0].css("span").text
+            comm[0] = ''
+            comment << comm
             i+=1
             break if i == comments.css("tr").length
           end
@@ -123,7 +126,7 @@ class ParseDiam
           height = mess1[2]
         end
 
-        answer = {'shape' => get_some_info(res, 'Shape and Cut:', 35, '</span>', 70),
+        answer = {'shape' => get_some_info(res, 'Shape and Cut:', 35, '</span>', 70).split[0],
                   'carat' => get_some_info(res, 'Carat Weight:', 34, '</span>', 70).to_f.round(2),
                   'clarity' => get_some_info(res, 'Clarity Grade:', 35, '</span>', 70),
                   'color' => get_some_info(res, 'Color Grade:', 34, '</span>', 70),
@@ -141,7 +144,7 @@ class ParseDiam
                   'table_size' => get_some_info(res, 'Table Width:', 33, '</span>', 70).split()[0].to_f,
                   'crown_height' => get_some_info(res, 'Crown Height:', 34, '</span>', 70).split()[0].to_f,
                   'pavilion_depth' => get_some_info(res, 'Pavillon Depth:', 36, '</span>', 70).split()[0].to_f,
-                  'girdle' => get_some_info(res, 'Girdle Thickness:', 38, '</span>', 70),
+                  'girdle' => get_some_info(res, 'Girdle Thickness:', 38, '</span>', 70).split(',')[0],
                   'culet_size' => '',
                   'culet_condition' => '',
                   'graining' => '',
@@ -150,6 +153,7 @@ class ParseDiam
 
 
       when "GIA-"
+        return 2 if get_some_info(resp, '<SHAPE>', 7, '</SHAPE>', 100) == ''
         mess = get_some_info(resp, '<LENGTH>', 8, '</LENGTH>', 100)
         if mess.index('-')
           mess1 = mess.split(' - ')
@@ -164,11 +168,19 @@ class ParseDiam
           height = mess1[2]
         end
 
-        comments = get_some_info(resp, '<REPORT_COMMENTS>', 17, '</REPORT_COMMENTS>', 110)
+       comments = get_some_info(resp, '<REPORT_COMMENTS>', 17, '</REPORT_COMMENTS>', 410)
+       comments.slice!("LINEBREAK")
+       comments.slice!("&#xd;")
+
         comments.slice!("LINEBREAK")
         comments.slice!("&#xd;")
 
-        answer = {"shape"=>get_some_info(resp, '<SHAPE>', 7, '</SHAPE>', 100),
+        #shape
+        shape = get_some_info(resp, '<SHAPE>', 7, '</SHAPE>', 100).split('~')[1].split()[0]
+        shape = "Radiant" if shape == "Cut-Cornered"
+        shape = "Princess" if shape == "Square"
+
+        answer = {"shape"=>shape,
         "carat"=>get_some_info(resp, '<WEIGHT>', 8, '</WEIGHT>', 100).to_f.round(2),
         "clarity"=>get_some_info(resp, '<CLARITY>', 9, '</CLARITY>', 100),
         "color"=>get_some_info(resp, '<COLOR>', 7, '</COLOR>', 100),
@@ -186,7 +198,7 @@ class ParseDiam
         "table_size"=>get_some_info(resp, '<TABLE_PCT>', 11, '</TABLE_PCT>', 100).to_f,
         "crown_height"=>'',
         "pavilion_depth"=>get_some_info(resp, '<PAV_DP>', 8, '</PAV_DP>', 100).to_f,
-        "girdle"=>get_some_info(resp, '<GIRDLE>', 8, '</GIRDLE>', 100).split()[0],
+        "girdle"=>get_some_info(resp, '<GIRDLE>', 8, '</GIRDLE>', 100),
         "culet_size"=>get_some_info(resp, '<CULET_SIZE>', 12, '</CULET_SIZE>', 100),
         "culet_condition"=>get_some_info(resp, '<CULET_CODE>', 12, '</CULET_CODE>', 100).capitalize,
         "graining"=>'',
@@ -251,7 +263,15 @@ class ParseDiam
             fluorescence_intensity = fluor[0].downcase.capitalize
           end
         end
-
+        #parse comments
+        comment =''
+        comments = get_val_td(resp, "Comments", 0).split('nts :')[1].strip()
+        if comments.size > 0
+          comments = comments.split(',')
+          comments.each{ |i|
+            comment << i.strip()
+          }
+        end
         if igi_cert_type == 2
           answer = {'shape' => get_val_td(resp, "SHAPE AND CUT", 2).split()[0].downcase.capitalize,
                     'carat' =>  get_val_td(resp, "Weight :", 2).to_f,
@@ -275,13 +295,13 @@ class ParseDiam
                     'culet_condition' => '',
                     'culet_size' => get_val_td(resp, "Culet Size").downcase.capitalize,
                     'graining' => '',
-                    'remarks' => get_val_td(resp, "Comments", 0).gsub(/\r\n/, ''),
+                    'remarks' => comment,
                     'certificate_path' => "http://igionline.com/igiweb/onlinereport/View_InstCert.cfm?pCert=#{@cert_number}&pWT=#{@carat}"}
         else
           answer = {'shape' => get_val_td(resp, "Shape and Cutting Style", 3).split()[0].downcase.capitalize,
                     'carat' =>  get_val_td(resp, "Weight :", 2).to_f,
                     'clarity' => get_val_td(resp, "Clarity Grade", 3).tr_s('\(\)',''),
-                    'color' => get_val_td(resp, "Color Grade", 3).tr_s('\(\)',' ').split()[1],
+                    'color' => get_val_td(resp, "Color Grade", 3).split('(')[1].delete(')'),
                     'fancy_color' => '',
                     'fancy_color_intensity' => '',
                     'fancy_color_overtone' => '',
@@ -300,7 +320,7 @@ class ParseDiam
                     'culet_condition' => '',
                     'culet_size' => '',
                     'graining' => '',
-                    'remarks' => get_val_td(resp, "Comments", 0).gsub(/\r\n/, ''),
+                    'remarks' => comment,
                     'certificate_path' => "http://igionline.com/igiweb/onlinereport/View_Cert.cfm?pCert=#{@cert_number}"}
         end
 
@@ -402,6 +422,7 @@ class ParseDiam
           width = mess1[1]
           height = mess1[2]
         end
+
         polish = cleane_arr(arr_res, 16, ":", 2).split()
         if polish.length>1
           polish1 = polish[0].capitalize
@@ -410,28 +431,30 @@ class ParseDiam
         else
           polish = polish[0].capitalize
         end
+
         symmetry = cleane_arr(arr_res, 17, ":").split()
-        if symmetry.length>1
-          symmetry1 = symmetry[0].capitalize
-          symmetry2 = symmetry[1].capitalize
-          symmetry = symmetry1 + " " + symmetry2
+        if  symmetry.size == 3
+          symmetry = symmetry[0].capitalize + " " + symmetry[1].capitalize + " " + symmetry[2].capitalize
+        elsif symmetry.size == 2
+          symmetry = symmetry[0].capitalize + " " + symmetry[1].capitalize
         else
           symmetry = symmetry[0].capitalize
         end
 
-
         culet = cleane_arr(arr_res, 15, ":").capitalize
         culet[-1] =''
-        fluorescence_intensity = cleane_arr(arr_res, 18, ":").split("'\'")[0]
+        ###
+        fluorescence_intensity = cleane_arr(arr_res, 18, ":").split("}")[0]
         fluorescence_intensity[-1] = ''
-        fluorescence_intensity[-1] = ''
-        fluor = fluorescence_intensity.split()
-        if fluor.length>1
-          fluorescence_intensity = fluor[0].downcase.capitalize
-          fluorescence_color = fluor[1].downcase.capitalize
-        else
-          fluorescence_intensity = fluor[0].downcase.capitalize
-          fluorescence_color = ''
+        if fluorescence_intensity != ""
+          fluor = fluorescence_intensity.split()
+          if fluor.length>1
+            fluorescence_intensity = fluor[0].downcase.capitalize
+            fluorescence_color = fluor[1].downcase.capitalize
+          else
+            fluorescence_intensity = fluor[0].downcase.capitalize
+            fluorescence_color = ''
+          end
         end
 
          answer = {'shape' => cleane_arr(arr_res, 2, ":", 2).split()[0].capitalize,
@@ -452,7 +475,7 @@ class ParseDiam
                     'table_size' => cleane_arr(arr_res, 8, ":").split("%")[0].to_f,
                     'crown_height' => cleane_arr(arr_res, 10, ":").split("%")[0].to_f,
                     'pavilion_depth' =>  cleane_arr(arr_res, 12, ":").split("%")[0].to_f,
-                    'girdle' => cleane_arr(arr_res, 14, ":"),
+                    'girdle' => cleane_arr(arr_res, 14, ":").capitalize,
                     'culet_size' => '',
                     'culet_condition' => culet,
                     'graining' => '',
@@ -568,7 +591,12 @@ class ParseDiam
         end
         culet = get_val_td(resp, 'Culet').lstrip
         #culet[0] = ''
-        answer = {'shape' => get_val_td(resp, 'Shape').capitalize,
+
+        #shape
+        shape = get_val_td(resp, 'Shape').capitalize
+        shape = "Round" if shape == "Brilliand"
+
+        answer = {'shape' => shape,
                   'carat' => get_val_td(resp, 'Carat(weight)').to_f.round(2),
                   'clarity' => get_val_td(resp, 'Clarity'),
                   'color' => get_val_td(resp, 'Colour Grade').split('(')[1][0,1],
@@ -613,16 +641,15 @@ class ParseDiam
         @answer = parse_response(response, @cert_type)
       when "GIA-"
         response = simple_post_meth('http://www.gia.edu/otmm_wcs_int/proxy-report', {'ReportNumber' => "#{@cert_number}", 'url' => "https://myapps.gia.edu/ReportCheckPOC/pocservlet?ReportNumber=#{@cert_number}"})
-        if (response.to_s.index("match found"))
-          puts 'Incorrect form data or not found'
-          return @answer = 2
-        end
         @answer = parse_response(response, @cert_type)
+        if @answer == 2
+          puts 'Incorrect form data or not found'
+          return @answer
+        end
       when "IGIUS"
         response = Nokogiri::HTML(simple_get_meth("http://igionline.com/igiweb/onlinereport/View_InstCert.cfm?pCert=#{@cert_number}&pWT=#{@carat}"))
         igi_cert_type = 2
         if (response.to_s.index("CAN'T BE FOUND"))
-          puts "TYPE2"
           response = Nokogiri::HTML(simple_get_meth("http://igionline.com/igiweb/onlinereport/View_Cert.cfm?pCert=#{@cert_number}"))
           if (response.to_s.index("CAN'T BE FOUND"))
             return  @answer = 2
@@ -689,6 +716,6 @@ class ParseDiam
   end
 end
 
-parse = ParseDiam.new("GIA-7136438784", 2.04)
+parse = ParseDiam.new("GIA-10352316", 1)
 parse.check_method_and_querying
-puts parse.answer.keys
+puts parse.answer
