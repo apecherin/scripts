@@ -6,7 +6,6 @@ class Numadd
   def greeting
     text = "Find 3 numbers to a sum\n=======================\n\nThis program identifies 3 numbers abc, def and ghi, the sum of which equals the user typed number. The digits of the 3 identified numbers are all different(no digit appears twice).\n"
     text = text + "\n\tExample: \n\t abc \n\t def \n\t ghi \n\t --- \n\t number\n\n\n"
-
     print text
   end
 
